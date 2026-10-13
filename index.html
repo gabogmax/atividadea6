@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meu Projeto + Chat IA Local</title>
+<style>
+  :root{--bg:#f6f7f9;--ink:#1c2430;--muted:#5d6877;--brand:#1f3a5f;--ai:#e6e9ee;--line:#d8dde5;--ok:#1b7a3d;--err:#b3261e}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink);line-height:1.55}
+  a{color:inherit}
+
+  /* ===== SITE BASE (SUBSTITUA ESTA PARTE PELO SEU SITE) ===== */
+  .site-header{background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+  .site-header .in{max-width:900px;margin:auto;padding:14px 20px;display:flex;justify-content:space-between;align-items:center;gap:16px}
+  .site-header nav a{margin-left:18px;text-decoration:none;color:var(--muted)}
+  .site-header nav a:hover{color:var(--brand)}
+  .hero{max-width:900px;margin:auto;padding:56px 20px 24px}
+  .hero h1{font-size:clamp(1.8rem,4vw,2.6rem);margin:0 0 12px;color:var(--brand)}
+  .hero p{max-width:60ch;color:var(--muted)}
+  .site-footer{max-width:900px;margin:40px auto;padding:0 20px;color:var(--muted);font-size:.9rem}
+  /* ===== FIM DO SITE BASE ===== */
+
+  /* ===== CHAT ===== */
+  #chat-section{max-width:900px;margin:24px auto 0;padding:0 20px}
+  .chat-box{background:#fff;border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;height:min(640px,80vh);overflow:hidden}
+  .chat-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}
+  .chat-head h2{margin:0;font-size:1.05rem}
+  #status{font-size:.85rem;color:var(--muted)}
+  #status.ready{color:var(--ok)}
+  #status.error{color:var(--err)}
+  #clearBtn{border:1px solid var(--line);background:#fff;border-radius:6px;padding:6px 12px;cursor:pointer;font:inherit;font-size:.85rem}
+  #clearBtn:hover{background:var(--bg)}
+  #chat{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px}
+  #welcome{color:var(--muted);text-align:center;margin:auto;max-width:44ch}
+  .msg{max-width:80%;padding:10px 14px;border-radius:14px;white-space:pre-wrap;word-wrap:break-word}
+  .msg.user{align-self:flex-end;background:var(--brand);color:#fff;border-bottom-right-radius:4px}
+  .msg.assistant{align-self:flex-start;background:var(--ai);border-bottom-left-radius:4px}
+  #typing{display:none;padding:0 16px 8px;color:var(--muted);font-size:.85rem}
+  #form{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line)}
+  #input{flex:1;resize:none;font:inherit;padding:10px 12px;border:1px solid var(--line);border-radius:8px;max-height:140px;min-height:42px}
+  #input:focus-visible,#sendBtn:focus-visible,#clearBtn:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+  #sendBtn{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:0 18px;font:inherit;cursor:pointer}
+  #sendBtn:disabled,#input:disabled{opacity:.5;cursor:not-allowed}
+  @media (max-width:600px){.site-header nav a{margin-left:10px}.hero{padding-top:32px}.msg{max-width:92%}}
+</style>
+</head>
+<body>
+
+<!-- ===== SITE BASE (SUBSTITUA ESTA PARTE PELO SEU SITE) ===== -->
+<header class="site-header"><div class="in">
+  <strong>Nome do Projeto</strong>
+  <nav><a href="#">Início</a><a href="#">Sobre</a><a href="#chat-section">Chat IA</a></nav>
+</div></header>
+<section class="hero">
+  <h1>Título do meu projeto</h1>
+  <p>Aqui fica o conteúdo original do seu site. O chat abaixo foi acrescentado como uma seção independente, sem alterar o restante da página.</p>
+</section>
+<!-- ===== FIM DO SITE BASE ===== -->
+
+<!-- ===== SEÇÃO DO CHAT: copie este bloco para o seu site ===== -->
+<section id="chat-section">
+  <div class="chat-box">
+    <div class="chat-head">
+      <h2>Assistente de IA local</h2>
+      <span id="status">Carregando modelo...</span>
+      <button id="clearBtn" type="button">Limpar</button>
+    </div>
+    <div id="chat">
+      <div id="welcome">Olá! Esta IA roda inteiramente no seu navegador. Na primeira vez, o modelo é baixado (cerca de 500 a 800 MB) e depois fica em cache.</div>
+    </div>
+    <div id="typing">IA está digitando...</div>
+    <form id="form">
+      <textarea id="input" rows="1" placeholder="Digite sua mensagem..." disabled></textarea>
+      <button id="sendBtn" type="submit" disabled>Enviar</button>
+    </form>
+  </div>
+</section>
+
+<footer class="site-footer">Rodapé do site. Privacidade: o que você digita no chat não sai do navegador.</footer>
+
+<script type="module">
+import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
+
+env.allowRemoteModels = true;
+env.allowLocalModels = false;
+const MODEL = "onnx-community/Qwen2.5-0.5B-Instruct";
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status"), chat = $("chat"), welcome = $("welcome"), typing = $("typing");
+const form = $("form"), input = $("input"), sendBtn = $("sendBtn"), clearBtn = $("clearBtn");
+
+const SYSTEM = { role: "system", content: "Você é um assistente prestativo. Responda sempre em português do Brasil, de forma clara e objetiva." };
+let generator = null;
+let messages = [SYSTEM];
+let busy = false;
+
+function setStatus(text, type = "") { statusEl.textContent = text; statusEl.className = type; }
+
+function addMessage(role, text) {
+  welcome.style.display = "none";
+  const div = document.createElement("div");
+  div.className = "msg " + role;
+  div.textContent = text;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function hasWorkingWebGPU() {
+  try {
+    if (!("gpu" in navigator)) return false;
+    return !!(await navigator.gpu.requestAdapter());
+  } catch { return false; }
+}
+
+function onProgress(p) {
+  if (p.status === "progress" && typeof p.progress === "number") {
+    setStatus(`Baixando modelo: ${p.progress.toFixed(0)}%`);
+  }
+}
+
+function onReady(label) {
+  setStatus(`Pronto (${label})`, "ready");
+  input.disabled = false; sendBtn.disabled = false; input.focus();
+}
+
+async function loadModel() {
+  try {
+    if (await hasWorkingWebGPU()) {
+      try {
+        generator = await pipeline("text-generation", MODEL, { device: "webgpu", dtype: "q4", progress_callback: onProgress });
+        return onReady("WebGPU");
+      } catch (e) { console.warn("WebGPU falhou, usando WASM:", e); }
+    }
+    setStatus("Carregando em modo WASM (CPU, mais lento)...");
+    generator = await pipeline("text-generation", MODEL, { device: "wasm", dtype: "int8", progress_callback: onProgress });
+    onReady("WASM");
+  } catch (e) {
+    console.error(e);
+    setStatus("Erro: " + (e && e.message ? e.message : e), "error");
+  }
+}
+
+async function generate(userText) {
+  busy = true; sendBtn.disabled = true; input.disabled = true; typing.style.display = "block";
+  messages.push({ role: "user", content: userText });
+  try {
+    const output = await generator(messages, {
+      max_new_tokens: 256, repetition_penalty: 1.1, temperature: 0.7, top_p: 0.9, do_sample: true
+    });
+    const reply = output[0].generated_text.at(-1).content;
+    messages.push({ role: "assistant", content: reply });
+    addMessage("assistant", reply);
+  } catch (e) {
+    console.error(e);
+    messages.pop();
+    setStatus("Erro ao gerar resposta: " + (e && e.message ? e.message : e), "error");
+  } finally {
+    busy = false; typing.style.display = "none";
+    sendBtn.disabled = false; input.disabled = false; input.focus();
+  }
+}
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text || !generator || busy) return;
+  addMessage("user", text);
+  input.value = ""; input.style.height = "auto";
+  generate(text);
+});
+
+input.addEventListener("input", () => {
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 140) + "px";
+});
+
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+});
+
+clearBtn.addEventListener("click", () => {
+  if (busy) return;
+  messages = [SYSTEM];
+  chat.querySelectorAll(".msg").forEach((m) => m.remove());
+  welcome.style.display = "block";
+});
+
+loadModel();
+</script>
+</body>
+</html>
